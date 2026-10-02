@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ระบบแจ้งเตือนน้ำท่วมและติดตามสถานะระดับน้ำแบบเรียลไทม์ (AquaAlert Live)</title>
+<!-- Tailwind CSS CDN -->
+<script src="https://cdn.tailwindcss.com"></script>
+<!-- FontAwesome Icons -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<!-- Chart.js CDN -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<!-- Leaflet OpenStreetMap CSS & JS -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<!-- Google Fonts: Prompt -->
+<link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<script>
+tailwind.config = {
+theme: {
+extend: {
+fontFamily: {
+sans: ['Prompt', 'sans-serif'],
+}
+}
+}
+}
+</script>
+<style>
+body { font-family: 'Prompt', sans-serif; background-color: #F8FAFC; }
+.pulse-red { animation: pulseRed 2s infinite; }
+@keyframes pulseRed {
+0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+70% { box-shadow: 0 0 0 12px rgba(239, 68, 68, 0); }
+100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+}
+#map { z-index: 10; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #f1f1f1; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+</style>
+</head>
+<body class="text-slate-800 antialiased flex flex-col min-h-screen">
+<!-- Header / Navbar -->
+<header class="bg-slate-900 text-white sticky top-0 z-40 shadow-md">
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+<div class="flex items-center justify-between h-16">
+<!-- Logo & App Title -->
+<div class="flex items-center space-x-3">
+<div class="bg-blue-600 p-2 rounded-xl text-white">
+<i class="fa-solid fa-house-flood-water text-xl"></i>
+</div>
+<div>
+<div class="flex items-center space-x-2">
+<h1 class="font-bold text-lg leading-tight sm:text-xl">AquaAlert TH</h1>
+<span class="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[10px] px-2 py-0.5 rounded-full font-semibold">LIVE Cloud</span>
+</div>
+<p class="text-xs text-slate-400 hidden sm:block">ระบบเฝ้าระวังและแจ้งเตือนภัยน้ำท่วมออนไลน์ร่วมกัน</p>
+</div>
+</div>
+<!-- Right Action Buttons -->
+<div class="flex items-center space-x-2 sm:space-x-3">
+<button onclick="shareWebsite()" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-2 rounded-xl font-medium text-xs sm:text-sm flex items-center space-x-1.5 transition border border-slate-700">
+<i class="fa-solid fa-share-nodes"></i>
+<span class="hidden sm:inline">แชร์เว็บให้เพื่อน</span>
+</button>
+<button onclick="openEmergencyModal()" class="bg-red-600 hover:bg-red-700 text-white px-3 py-2 sm:px-4 sm:py-2 rounded-xl font-medium text-xs sm:text-sm flex items-center space-x-1.5 transition shadow-lg pulse-red">
+<i class="fa-solid fa-triangle-exclamation"></i>
+<span>ประกาศฉุกเฉิน</span>
+</button>
+</div>
+</div>
+</div>
+</header>
+<!-- Global Emergency Alert Banner -->
+<div id="broadcastBanner" class="bg-red-600 text-white px-4 py-2.5 shadow-md hidden">
+<div class="max-w-7xl mx-auto flex items-center justify-between text-xs sm:text-sm font-medium">
+<div class="flex items-center space-x-2 overflow-hidden">
+<span class="bg-white text-red-700 text-xs px-2 py-0.5 rounded font-bold uppercase shrink-0">ประกาศฉุกเฉินด่วน</span>
+<p id="broadcastBannerMsg" class="truncate">แจ้งเตือนสถานการณ์น้ำท่วม</p>
+</div>
+<button onclick="document.getElementById('broadcastBanner').classList.add('hidden')" class="text-white hover:text-slate-200 ml-2 font-bold">
+<i class="fa-solid fa-xmark"></i>
+</button>
+</div>
+</div>
+<!-- Main Content Grid -->
+<main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+<!-- Top Summary Cards -->
+<section class="grid grid-cols-2 md:grid-cols-4 gap-4">
+<div class="bg-white rounded-2xl p-4 border-l-4 border-emerald-500 shadow-sm">
+<p class="text-xs font-medium text-slate-500">ปกติ (Normal)</p>
+<h3 id="countNormal" class="text-xl font-bold text-slate-800 mt-1">0 สถานี</h3>
+<p class="text-[11px] text-slate-400 mt-1">ระดับน้ำปลอดภัย</p>
+</div>
+<div class="bg-white rounded-2xl p-4 border-l-4 border-amber-500 shadow-sm">
+<p class="text-xs font-medium text-slate-500">เฝ้าระวัง (Watch)</p>
+<h3 id="countWatch" class="text-xl font-bold text-slate-800 mt-1">0 สถานี</h3>
+<p class="text-[11px] text-slate-400 mt-1">เตรียมความพร้อม</p>
+</div>
+<div class="bg-white rounded-2xl p-4 border-l-4 border-orange-500 shadow-sm">
+<p class="text-xs font-medium text-slate-500">เตือนภัย (Warning)</p>
+<h3 id="countWarning" class="text-xl font-bold text-slate-800 mt-1">0 สถานี</h3>
+<p class="text-[11px] text-slate-400 mt-1">ขนของขึ้นที่สูง</p>
+</div>
+<div class="bg-white rounded-2xl p-4 border-l-4 border-red-500 shadow-sm">
+<p class="text-xs font-medium text-slate-500">วิกฤต (Critical)</p>
+<h3 id="countCritical" class="text-xl font-bold text-slate-800 mt-1">0 สถานี</h3>
+<p class="text-[11px] text-slate-400 mt-1">อพยพด่วน</p>
+</div>
+</section>
+<!-- Interactive Map & Station Explorer -->
+<section class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+<!-- Leaflet Map Container -->
+<div class="lg:col-span-2 bg-white rounded-2xl p-4 shadow-sm border border-slate-100 flex flex-col">
+<div class="flex items-center justify-between mb-3">
+<div>
+<h2 class="text-base font-bold text-slate-800 flex items-center gap-2">
+<i class="fa-solid fa-map-location-dot text-blue-600"></i>
+แผนที่แสดงจุดตรวจวัดและรายงานจากประชาชน
+</h2>
+<p class="text-xs text-slate-500">กดที่แผนที่เพื่อเลือกตำแหน่งในการส่งรายงานน้ำท่วมได้</p>
+</div>
+<span class="text-xs bg-blue-50 text-blue-600 px-2.5 py-1 rounded-lg border border-blue-100 flex items-center gap-1 font-medium">
+<span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+Realtime Live
+</span>
+</div>
+<!-- Leaflet Map Element -->
+<div id="map" class="w-full h-[380px] sm:h-[420px] rounded-xl border border-slate-200"></div>
+<div class="flex flex-wrap items-center justify-between gap-2 mt-3 text-xs text-slate-500">
+<div class="flex items-center space-x-3">
+<span class="flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-emerald-500 inline-block"></span> ปกติ</span>
+<span class="flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-amber-500 inline-block"></span> เฝ้าระวัง</span>
+<span class="flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-orange-500 inline-block"></span> เตือนภัย</span>
+<span class="flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-red-500 inline-block"></span> วิกฤต</span>
+<span class="flex items-center gap-1"><i class="fa-solid fa-location-dot text-purple-600"></i> รายงานประชาชน</span>
+</div>
+</div>
+</div>
+<!-- Station & Selected Detail Card -->
+<div class="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 flex flex-col justify-between">
+<div>
+<div class="flex items-center justify-between pb-3 border-b border-slate-100">
+<span id="selectedStationBadge" class="px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700">
+ปกติ
+</span>
+<span class="text-xs text-slate-400" id="selectedStationCode">ST-001</span>
+</div>
+<div class="mt-4">
+<h3 id="selectedStationName" class="text-lg font-bold text-slate-800">สถานีประตูน้ำบางปะอิน</h3>
+<p id="selectedStationLoc" class="text-xs text-slate-500 mt-1"><i class="fa-solid fa-location-dot text-slate-400 mr-1"></i>อ.บางปะอิน จ.พระนครศรีอยุธยา</p>
+</div>
+<div class="grid grid-cols-2 gap-3 mt-4">
+<div class="bg-slate-50 p-3 rounded-xl border border-slate-100">
+<span class="text-xs text-slate-500 block">ระดับน้ำปัจจุบัน</span>
+<div class="flex items-baseline space-x-1 mt-1">
+<span id="selectedWaterLevel" class="text-2xl font-bold text-slate-800">2.45</span>
+<span class="text-xs text-slate-500">ม.</span>
+</div>
+</div>
+<div class="bg-slate-50 p-3 rounded-xl border border-slate-100">
+<span class="text-xs text-slate-500 block">ระดับตลิ่ง</span>
+<div class="flex items-baseline space-x-1 mt-1">
+<span id="selectedBankLevel" class="text-2xl font-bold text-slate-600">4.00</span>
+<span class="text-xs text-slate-500">ม.</span>
+</div>
+</div>
+</div>
+<div id="selectedAdviceBox" class="mt-4 p-3 bg-emerald-50 rounded-xl border border-emerald-100 text-xs text-emerald-800 leading-relaxed">
+ระดับน้ำอยู่ในเกณฑ์ปกติ สัญจรและดำเนินชีวิตได้ตามปกติ
+</div>
+</div>
+<div class="mt-4 pt-3 border-t border-slate-100">
+<button onclick="switchGraphStation()" class="w-full py-2 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-xl font-medium text-xs transition flex items-center justify-center gap-2">
+<i class="fa-solid fa-chart-line"></i>
+ดูสถิติกราฟจุดนี้
+</button>
+</div>
+</div>
+</section>
+<!-- Chart Section -->
+<section class="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
+<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
+<div>
+<h2 class="text-lg font-bold text-slate-800 flex items-center gap-2">
+<i class="fa-solid fa-chart-area text-blue-600"></i>
+แนวโน้มระดับน้ำและการคาดการณ์
+</h2>
+<p class="text-xs text-slate-500">เปรียบเทียบข้อมูลย้อนหลัง และโมเดลพยากรณ์</p>
+</div>
+<div class="flex items-center space-x-2">
+<label class="text-xs text-slate-500">เลือกสถานี:</label>
+<select id="chartStationSelect" onchange="updateChartData(this.value)" class="bg-slate-50 border border-slate-200 text-slate-700 text-xs rounded-xl px-3 py-2 font-medium focus:ring-2 focus:ring-blue-500 outline-none">
+</select>
+</div>
+</div>
+<div class="w-full h-[280px]">
+<canvas id="waterLevelChart"></canvas>
+</div>
+</section>
+<!-- Citizen Crowdsourcing & Live Feed Grid -->
+<section class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+<!-- Crowdsource Report Form -->
+<div class="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 lg:col-span-1">
+<div class="flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
+<div>
+<h2 class="text-base font-bold text-slate-800 flex items-center gap-2">
+<i class="f
